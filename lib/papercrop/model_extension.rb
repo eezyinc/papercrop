@@ -67,7 +67,7 @@ module Papercrop
       # @return [Paperclip::Geometry]
       def image_geometry(attachment_name, style = :original)
         @geometry ||= {}
-        path = (self.send(attachment_name).options[:storage] == :s3) ? self.send(attachment_name).url(style) : self.send(attachment_name).path(style)
+        path = (self.send(attachment_name).options[:storage] == :s3) ? RemoteFile.new(self.send(attachment_name).url(style)).path : self.send(attachment_name).path(style)
         @geometry[style] ||= Paperclip::Geometry.from_file(path)
       end
 
@@ -107,6 +107,44 @@ module Papercrop
         end
 
     end
+  end
+end
+
+require 'open-uri'
+require 'digest/sha1'
+
+class RemoteFile < ::Tempfile
+
+  def initialize(path, options = {})
+    @original_filename  = options[:filename] || File.basename(path).gsub(/\?.*/, '')
+    @remote_path        = path
+    @content_type       = options[:content_type]
+
+    super Digest::SHA1.hexdigest(path), (options[:tmpdir] || Dir::tmpdir)
+    fetch
+  end
+
+  def fetch
+    Rails.logger.info "(debug) RemoteFile @remote_path is: #{@remote_path}"
+    string_io = OpenURI.send(:open, @remote_path)
+    self.binmode
+    self.write string_io.read
+    self.rewind
+    self
+  end
+
+  def original_filename
+    @original_filename
+  end
+
+  def content_type
+    return @content_type unless @content_type.nil?
+
+    mime = `file --mime -br #{self.path}`.strip
+    mime = mime.gsub(/^.*: */,"")
+    mime = mime.gsub(/;.*$/,"")
+    mime = mime.gsub(/,.*$/,"")
+    mime
   end
 end
 
